@@ -1,0 +1,16 @@
+schema_version = "1.0.1"
+
+id = "viewport_to_texture_baker"
+version = "1.0.1"
+name = "Viewport to Texture Baker"
+tagline = "Bake viewport material Color/Metallic/Roughness to texture files"
+maintainer = "User"
+type = "add-on"
+
+blender_version_min = "4.2.0"
+
+license = ["SPDX:GPL-3.0-or-later"]
+category = "Object"
+
+[permissions]
+files = "Required to save baked textures to disk"
