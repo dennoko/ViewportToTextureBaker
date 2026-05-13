@@ -9,7 +9,7 @@ _CHANNELS = (
     ('Metallic',  False),
     ('Roughness', False),
 )
-_MAX_FILE_SUFFIX_EXCLUSIVE = 10000
+_MAX_FILE_SUFFIX = 10000
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -225,13 +225,13 @@ class OBJECT_OT_viewport_to_texture_baker(bpy.types.Operator):
             return path
         stem, ext = os.path.splitext(filename)
         i = 1
-        while i < _MAX_FILE_SUFFIX_EXCLUSIVE:
+        while i < _MAX_FILE_SUFFIX:
             candidate = os.path.join(out_dir, f"{stem}_{i:04d}{ext}")
             if not os.path.exists(candidate):
                 return candidate
             i += 1
         raise RuntimeError(
-            f"No available filename suffix in range 0001-{_MAX_FILE_SUFFIX_EXCLUSIVE - 1:04d} for: {filename}"
+            f"No available filename suffix in range 0001-{_MAX_FILE_SUFFIX - 1:04d} for: {filename}"
         )
 
     def _prepare_save_queue(self, baked, base, out_dir, res):
@@ -385,6 +385,7 @@ class OBJECT_OT_viewport_to_texture_baker(bpy.types.Operator):
             )
             try:
                 self._save_png(img, path)
+                # Cleanup temporary packed image created in _prepare_save_queue.
                 if remove_after_save and img and img.name in bpy.data.images:
                     bpy.data.images.remove(img)
             except Exception as exc:
