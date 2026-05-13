@@ -66,7 +66,7 @@
 | **Resolution** | 出力テクスチャの解像度（512 / 1024 / 2048 / 4096） | 2048 |
 | **Margin (px)** | UV アイランド境界の塗り足し幅（ブリード） | 16 px |
 | **Output Path** | テクスチャの保存先フォルダ | `Documents/ViewportToTextureBaker/<ファイル名>/` |
-| **Overwrite Existing** | 同名ファイルを上書きするか。OFF の場合は `_001`, `_002`… の連番で保存 | ON |
+| **Overwrite Existing** | 同名ファイルを上書きするか。OFF の場合は `_0001`, `_0002`… の連番で保存 | ON |
 | **Pack Metallic/Roughness** | Metallic と Roughness を 1 枚にまとめる | OFF |
 | **Metallic →**（Pack ON 時） | パック画像の Metallic を格納するチャンネル | B |
 | **Roughness →**（Pack ON 時） | パック画像の Roughness を格納するチャンネル | G |

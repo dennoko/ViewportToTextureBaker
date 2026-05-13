@@ -9,6 +9,7 @@ _CHANNELS = (
     ('Metallic',  False),
     ('Roughness', False),
 )
+_MAX_FILE_VERSIONS = 9999
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -224,13 +225,13 @@ class OBJECT_OT_viewport_to_texture_baker(bpy.types.Operator):
             return path
         stem, ext = os.path.splitext(filename)
         i = 1
-        while i <= 9999:
-            candidate = os.path.join(out_dir, f"{stem}_{i:03d}{ext}")
+        while i <= _MAX_FILE_VERSIONS:
+            candidate = os.path.join(out_dir, f"{stem}_{i:04d}{ext}")
             if not os.path.exists(candidate):
                 return candidate
             i += 1
         raise RuntimeError(
-            f"Exceeded maximum file versioning limit (9999) for: {filename}"
+            f"Exceeded maximum file versioning limit ({_MAX_FILE_VERSIONS}) for: {filename}"
         )
 
     def _prepare_save_queue(self, baked, base, out_dir, res):
