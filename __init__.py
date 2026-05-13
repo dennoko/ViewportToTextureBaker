@@ -9,7 +9,7 @@ _CHANNELS = (
     ('Metallic',  False),
     ('Roughness', False),
 )
-_MAX_FILE_VERSIONS = 9999
+_MAX_FILE_SUFFIX = 9999
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -225,13 +225,13 @@ class OBJECT_OT_viewport_to_texture_baker(bpy.types.Operator):
             return path
         stem, ext = os.path.splitext(filename)
         i = 1
-        while i <= _MAX_FILE_VERSIONS:
+        while i <= _MAX_FILE_SUFFIX:
             candidate = os.path.join(out_dir, f"{stem}_{i:04d}{ext}")
             if not os.path.exists(candidate):
                 return candidate
             i += 1
         raise RuntimeError(
-            f"Exceeded maximum file versioning limit ({_MAX_FILE_VERSIONS}) for: {filename}"
+            f"No available filename suffix in range 0001-{_MAX_FILE_SUFFIX:04d} for: {filename}"
         )
 
     def _prepare_save_queue(self, baked, base, out_dir, res):
@@ -374,7 +374,7 @@ class OBJECT_OT_viewport_to_texture_baker(bpy.types.Operator):
 
             name, img, path, remove_after_save = self._save_queue.pop(0)
             self._save_done += 1
-            progress_ratio = (self._save_done / self._save_total) if self._save_total else 1.0
+            progress_ratio = self._save_done / self._save_total
             progress = 92 + int(progress_ratio * 8)
             wm.progress_update(min(100, progress))
             context.area.header_text_set(
