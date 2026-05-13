@@ -9,7 +9,7 @@ _CHANNELS = (
     ('Metallic',  False),
     ('Roughness', False),
 )
-_MAX_FILE_SUFFIX = 9999
+_MAX_FILE_SUFFIX_EXCLUSIVE = 10000
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -225,13 +225,13 @@ class OBJECT_OT_viewport_to_texture_baker(bpy.types.Operator):
             return path
         stem, ext = os.path.splitext(filename)
         i = 1
-        while i <= _MAX_FILE_SUFFIX:
+        while i < _MAX_FILE_SUFFIX_EXCLUSIVE:
             candidate = os.path.join(out_dir, f"{stem}_{i:04d}{ext}")
             if not os.path.exists(candidate):
                 return candidate
             i += 1
         raise RuntimeError(
-            f"No available filename suffix in range 0001-{_MAX_FILE_SUFFIX:04d} for: {filename}"
+            f"No available filename suffix in range 0001-{_MAX_FILE_SUFFIX_EXCLUSIVE - 1:04d} for: {filename}"
         )
 
     def _prepare_save_queue(self, baked, base, out_dir, res):
@@ -369,7 +369,10 @@ class OBJECT_OT_viewport_to_texture_baker(bpy.types.Operator):
         # ── SAVE_NEXT: write one file per timer tick for better responsiveness ─
         elif self._state == 'SAVE_NEXT':
             if not self._save_queue:
-                self.report({'INFO'}, "Textures saved to: " + self._out_dir)
+                if self._save_total > 0:
+                    self.report({'INFO'}, "Textures saved to: " + self._out_dir)
+                else:
+                    self.report({'WARNING'}, "No textures were saved")
                 return self._do_finish(context)
 
             name, img, path, remove_after_save = self._save_queue.pop(0)
@@ -386,7 +389,10 @@ class OBJECT_OT_viewport_to_texture_baker(bpy.types.Operator):
                     bpy.data.images.remove(img)
             except Exception as exc:
                 import traceback
-                self.report({'ERROR'}, f"{exc} (some files may already be saved)")
+                self.report(
+                    {'ERROR'},
+                    f"Failed to save {name}: {exc}. Previously saved files remain in output directory."
+                )
                 print("[ViewportToTextureBaker]\n" + traceback.format_exc())
                 return self._do_cancel(context)
             return {'RUNNING_MODAL'}
