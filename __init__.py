@@ -224,13 +224,14 @@ class OBJECT_OT_viewport_to_texture_baker(bpy.types.Operator):
             return path
         stem, ext = os.path.splitext(filename)
         i = 1
-        while True:
+        while i <= 9999:
             candidate = os.path.join(out_dir, f"{stem}_{i:03d}{ext}")
             if not os.path.exists(candidate):
                 return candidate
-            if i >= 9999:
-                raise RuntimeError(f"Too many existing files for: {filename}")
             i += 1
+        raise RuntimeError(
+            f"Exceeded maximum file versioning limit (9999) for: {filename}"
+        )
 
     def _prepare_save_queue(self, baked, base, out_dir, res):
         queue = []
@@ -384,7 +385,7 @@ class OBJECT_OT_viewport_to_texture_baker(bpy.types.Operator):
                     bpy.data.images.remove(img)
             except Exception as exc:
                 import traceback
-                self.report({'ERROR'}, str(exc))
+                self.report({'ERROR'}, f"{exc} (some files may already be saved)")
                 print("[ViewportToTextureBaker]\n" + traceback.format_exc())
                 return self._do_cancel(context)
             return {'RUNNING_MODAL'}
