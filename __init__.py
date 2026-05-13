@@ -9,6 +9,7 @@ _CHANNELS = (
     ('Metallic',  False),
     ('Roughness', False),
 )
+_MAX_FILE_SUFFIX = 10000
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -19,7 +20,7 @@ class OBJECT_OT_viewport_to_texture_baker(bpy.types.Operator):
     """Export viewport material properties (Color, Metallic, Roughness) to textures"""
     bl_idname = "object.viewport_to_texture_baker"
     bl_label = "Export Viewport to Textures"
-    bl_options = {'REGISTER', 'UNDO'}
+    bl_options = {'UNDO'}
 
     # ── bpy.props ─────────────────────────────────────────────────────────────
 
@@ -48,6 +49,12 @@ class OBJECT_OT_viewport_to_texture_baker(bpy.types.Operator):
         description="Directory where textures are saved",
         subtype='DIR_PATH',
         default="",
+    )
+
+    overwrite_existing: bpy.props.BoolProperty(
+        name="Overwrite Existing",
+        description="Overwrite files with the same name. Disable to save with numbered suffixes",
+        default=True,
     )
 
     pack_textures: bpy.props.BoolProperty(
@@ -212,33 +219,46 @@ class OBJECT_OT_viewport_to_texture_baker(bpy.types.Operator):
         img.file_format  = 'PNG'
         img.save()
 
-    def _save_results(self, baked, base, out_dir, res):
+    def _resolve_output_filepath(self, out_dir, filename):
+        path = os.path.join(out_dir, filename)
+        if self.overwrite_existing or not os.path.exists(path):
+            return path
+        stem, ext = os.path.splitext(filename)
+        i = 1
+        while i < _MAX_FILE_SUFFIX:
+            candidate = os.path.join(out_dir, f"{stem}_{i:04d}{ext}")
+            if not os.path.exists(candidate):
+                return candidate
+            i += 1
+        raise RuntimeError(
+            f"No available filename suffix in range 0001-{_MAX_FILE_SUFFIX - 1:04d} for: {filename}"
+        )
+
+    def _prepare_save_queue(self, baked, base, out_dir, res):
+        queue = []
         if self.pack_textures:
-            self._save_png(baked['BaseColor'],
-                           os.path.join(out_dir, f"{base}_BaseColor.png"))
+            queue.append((
+                "BaseColor",
+                baked['BaseColor'],
+                self._resolve_output_filepath(out_dir, f"{base}_BaseColor.png"),
+                False,
+            ))
             packed = self._make_packed_image(baked['Metallic'], baked['Roughness'], res)
-            try:
-                self._save_png(packed,
-                               os.path.join(out_dir, f"{base}_MetallicRoughness.png"))
-            finally:
-                bpy.data.images.remove(packed)
+            queue.append((
+                "MetallicRoughness",
+                packed,
+                self._resolve_output_filepath(out_dir, f"{base}_MetallicRoughness.png"),
+                True,
+            ))
         else:
             for ch in ('BaseColor', 'Metallic', 'Roughness'):
-                self._save_png(baked[ch], os.path.join(out_dir, f"{base}_{ch}.png"))
-
-    # ── synchronous single-channel bake (used by execute) ────────────────────
-
-    def _bake_channel_sync(self, materials, channel, is_color, res):
-        """Setup nodes, run blocking bake, restore, return image."""
-        img    = self._new_bake_image(f"__vtb_{channel}__", res, is_color)
-        states = {mat.name: self._setup_material(mat, img, channel) for mat in materials}
-        try:
-            bpy.ops.object.bake(type='EMIT', use_clear=True)
-        finally:
-            for mat in materials:
-                if mat.name in states:
-                    self._restore_material(mat, states[mat.name])
-        return img
+                queue.append((
+                    ch,
+                    baked[ch],
+                    self._resolve_output_filepath(out_dir, f"{base}_{ch}.png"),
+                    False,
+                ))
+        return queue
 
     # ── bake completion handlers (modal path) ─────────────────────────────────
 
@@ -284,7 +304,7 @@ class OBJECT_OT_viewport_to_texture_baker(bpy.types.Operator):
         if self._state == 'INIT_CHANNEL':
             idx = self._channel_idx
             if idx >= total:
-                self._state = 'SAVE'
+                self._state = 'SAVE_PREP'
                 return {'RUNNING_MODAL'}
 
             channel, is_color = _CHANNELS[idx]
@@ -334,18 +354,49 @@ class OBJECT_OT_viewport_to_texture_baker(bpy.types.Operator):
 
             return {'RUNNING_MODAL'}
 
-        # ── SAVE: write files then finish ─────────────────────────────────────
-        elif self._state == 'SAVE':
-            wm.progress_update(92)
-            context.area.header_text_set("Viewport Baker: Saving textures...")
+        # ── SAVE_PREP: cache save targets then start incremental writes ───────
+        elif self._state == 'SAVE_PREP':
+            wm.progress_update(90)
+            context.area.header_text_set("Viewport Baker: Preparing file output...")
+            self._save_queue = self._prepare_save_queue(
+                self._baked, self._base, self._out_dir, self._res
+            )
+            self._save_done = 0
+            self._save_total = len(self._save_queue)
+            self._state = 'SAVE_NEXT'
+            return {'RUNNING_MODAL'}
+
+        # ── SAVE_NEXT: write one file per timer tick for better responsiveness ─
+        elif self._state == 'SAVE_NEXT':
+            if not self._save_queue:
+                if self._save_total > 0:
+                    self.report({'INFO'}, "Textures saved to: " + self._out_dir)
+                else:
+                    self.report({'WARNING'}, "No textures were saved")
+                return self._do_finish(context)
+
+            name, img, path, remove_after_save = self._save_queue.pop(0)
+            self._save_done += 1
+            progress_ratio = self._save_done / self._save_total
+            progress = 92 + int(progress_ratio * 8)
+            wm.progress_update(min(100, progress))
+            context.area.header_text_set(
+                f"Viewport Baker: Saving {name} ({self._save_done}/{self._save_total})..."
+            )
             try:
-                self._save_results(self._baked, self._base, self._out_dir, self._res)
-                self.report({'INFO'}, "Textures saved to: " + self._out_dir)
+                self._save_png(img, path)
+                # Cleanup temporary packed image created in _prepare_save_queue.
+                if remove_after_save and img and img.name in bpy.data.images:
+                    bpy.data.images.remove(img)
             except Exception as exc:
                 import traceback
-                self.report({'ERROR'}, str(exc))
+                self.report(
+                    {'ERROR'},
+                    f"Failed to save {name}: {exc}. Previously saved files remain in output directory."
+                )
                 print("[ViewportToTextureBaker]\n" + traceback.format_exc())
-            return self._do_finish(context)
+                return self._do_cancel(context)
+            return {'RUNNING_MODAL'}
 
         return {'RUNNING_MODAL'}
 
@@ -392,12 +443,16 @@ class OBJECT_OT_viewport_to_texture_baker(bpy.types.Operator):
         self._baked       = {}
         self._current_img = None
 
-    # ── invoke: async modal path (called from the right-click menu) ───────────
+    # ── invoke: show pre-execution settings dialog ─────────────────────────────
 
     def invoke(self, context, event):
         if not self.output_path:
             self.output_path = self._resolved_output_path()
+        return context.window_manager.invoke_props_dialog(self, width=420)
 
+    # ── execute: async modal path (called after dialog confirmation) ───────────
+
+    def execute(self, context):
         mesh_objs = [o for o in context.selected_objects if o.type == 'MESH']
         if not mesh_objs:
             self.report({'ERROR'}, "No mesh objects selected")
@@ -426,6 +481,9 @@ class OBJECT_OT_viewport_to_texture_baker(bpy.types.Operator):
         self._bake_failed  = False
         self._h_complete   = None
         self._h_error      = None
+        self._save_queue   = []
+        self._save_done    = 0
+        self._save_total   = 0
 
         # Save render state before overriding
         scene = context.scene
@@ -445,68 +503,7 @@ class OBJECT_OT_viewport_to_texture_baker(bpy.types.Operator):
         wm.modal_handler_add(self)
         return {'RUNNING_MODAL'}
 
-    # ── execute: sync path (called by Adjust Last Operation) ─────────────────
-
-    def execute(self, context):
-        mesh_objs = [o for o in context.selected_objects if o.type == 'MESH']
-        if not mesh_objs:
-            self.report({'ERROR'}, "No mesh objects selected")
-            return {'CANCELLED'}
-
-        missing_uv = [o.name for o in mesh_objs if not o.data.uv_layers]
-        if missing_uv:
-            self.report({'ERROR'}, "No UV map: " + ", ".join(missing_uv))
-            return {'CANCELLED'}
-
-        out_dir   = self._resolved_output_path()
-        os.makedirs(out_dir, exist_ok=True)
-        base      = self._base_name()
-        res       = int(self.resolution)
-        materials = self._unique_materials(mesh_objs)
-        total     = len(_CHANNELS)
-
-        scene = context.scene
-        orig_engine      = scene.render.engine
-        orig_margin      = scene.render.bake.margin
-        orig_margin_type = scene.render.bake.margin_type
-        orig_active      = context.view_layer.objects.active
-
-        scene.render.engine           = 'CYCLES'
-        scene.render.bake.margin      = self.margin
-        scene.render.bake.margin_type = 'EXTEND'
-        context.view_layer.objects.active = mesh_objs[-1]
-
-        baked = {}
-        try:
-            for i, (ch, is_color) in enumerate(_CHANNELS):
-                context.area.header_text_set(
-                    f"Viewport Baker: Baking {ch} ({i + 1}/{total})..."
-                )
-                baked[ch] = self._bake_channel_sync(materials, ch, is_color, res)
-
-            context.area.header_text_set("Viewport Baker: Saving textures...")
-            self._save_results(baked, base, out_dir, res)
-            self.report({'INFO'}, "Textures saved to: " + out_dir)
-
-        except Exception as exc:
-            import traceback
-            self.report({'ERROR'}, str(exc))
-            print("[ViewportToTextureBaker]\n" + traceback.format_exc())
-            return {'CANCELLED'}
-
-        finally:
-            for img in baked.values():
-                if img and img.name in bpy.data.images:
-                    bpy.data.images.remove(img)
-            scene.render.engine           = orig_engine
-            scene.render.bake.margin      = orig_margin
-            scene.render.bake.margin_type = orig_margin_type
-            context.view_layer.objects.active = orig_active
-            context.area.header_text_set(None)
-
-        return {'FINISHED'}
-
-    # ── draw: "Adjust Last Operation" panel UI ────────────────────────────────
+    # ── draw: pre-execution settings dialog UI ─────────────────────────────────
 
     def draw(self, context):
         layout = self.layout
@@ -514,6 +511,7 @@ class OBJECT_OT_viewport_to_texture_baker(bpy.types.Operator):
         layout.prop(self, 'resolution')
         layout.prop(self, 'margin')
         layout.prop(self, 'output_path')
+        layout.prop(self, 'overwrite_existing')
         layout.separator()
         layout.prop(self, 'pack_textures')
         if self.pack_textures:
