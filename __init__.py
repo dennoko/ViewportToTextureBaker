@@ -228,6 +228,8 @@ class OBJECT_OT_viewport_to_texture_baker(bpy.types.Operator):
             candidate = os.path.join(out_dir, f"{stem}_{i:03d}{ext}")
             if not os.path.exists(candidate):
                 return candidate
+            if i >= 9999:
+                raise RuntimeError(f"Too many existing files for: {filename}")
             i += 1
 
     def _prepare_save_queue(self, baked, base, out_dir, res):
@@ -358,7 +360,7 @@ class OBJECT_OT_viewport_to_texture_baker(bpy.types.Operator):
                 self._baked, self._base, self._out_dir, self._res
             )
             self._save_done = 0
-            self._save_total = max(1, len(self._save_queue))
+            self._save_total = len(self._save_queue)
             self._state = 'SAVE_NEXT'
             return {'RUNNING_MODAL'}
 
@@ -370,7 +372,8 @@ class OBJECT_OT_viewport_to_texture_baker(bpy.types.Operator):
 
             name, img, path, remove_after_save = self._save_queue.pop(0)
             self._save_done += 1
-            progress = 92 + int((self._save_done / self._save_total) * 8)
+            progress_ratio = (self._save_done / self._save_total) if self._save_total else 1.0
+            progress = 92 + int(progress_ratio * 8)
             wm.progress_update(min(100, progress))
             context.area.header_text_set(
                 f"Viewport Baker: Saving {name} ({self._save_done}/{self._save_total})..."
