@@ -1,7 +1,7 @@
 schema_version = "1.0.1"
 
 id = "viewport_to_texture_baker"
-version = "1.0.1"
+version = "1.0.2"
 name = "Viewport to Texture Baker"
 tagline = "Bake viewport material Color/Metallic/Roughness to texture files"
 maintainer = "User"
